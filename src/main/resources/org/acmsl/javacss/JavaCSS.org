@@ -1,0 +1,73 @@
+* JavaCSS
+
+# 1. Choose a topic
+# 2. Find information
+# 3. State your thesis
+# 4. Make a tentative outline
+# 5. Organize your notes
+# 6. Write your first draft
+# 7. Revise your outline and draft
+# 8. Type final paper
+
+** Introduction
+# PROPERTIES:
+# +intro
+JavaCSS is a toolset to simplify writing Java code.
+
+Main benefits:
+- Automation of the output style and conventions.
+- Dependency management: import statement, pom.xml.
+# -intro
+*** Parser
+
+JavaCSS contains an ANTLR-based Java parser. It reads Java source code, and generates an Abstract Syntax Tree (AST).
+The parser and lexer are built by ANTLR from the [[https://raw.githubusercontent.com/antlr/grammars-v4/master/java8/Java8.g4][Java8.g4]] grammar already available in ANTLR's github repository.
+
+Looking at the grammar itself, its main entry point is the "compilationUnit" rule:
+  compilationUnit
+    :  packageDeclaration? importDeclaration* typeDeclaration* EOF
+    ;
+
+JavaCSS needs to parse whole Java files as well as certain incomplete Java snippets. Initially, the above rule seems to fit JavaCSS
+requirements nicely.
+
+*** Generator
+
+The whole process consists of:
+- parsing Java code
+- generating an AST
+- AST processing
+- serializing the final AST
+
+JavaCSS uses StringTemplate as generator tool. However, it currently lacks a mechanism to bind or associate templates to parts of the AST.
+We'll refer to this feature as "template selectors".
+
+** Prototype
+
+*** Project setup
+
+As with any other regular Java project, we'll start by investing some time in preparing the tool ecosystem:
+
+- Create a new repository in github.
+- Set up the folder structure expected by Maven.
+- Write the initial Maven's pom.xml
+- Create a new Jenkins job to listen to changes on the github repository.
+
+*** First test
+
+The simplest test is simple: we want to verify the parser supports Java8 code and generates valid AST instances.
+Since we just use ANTLR-provided Java grammar, the purpose of this test is a simple verification of the correctness of
+the generated parser. We won't write many tests, since they don't help guiding us in the process of JavaCSS development.
+
+Anyway, let's check if it is able to read the following Java code:
+
+public interface Resolver
+    extends Serializable {
+
+    public int resolve(String value);
+}
+
+To write the test, we need to remember the API ANTLR provides for the generated parser. To build the parser instance,
+we provide the text to build a Java8Lexer. Then, we instantiate a CommonTokenStream with the lexer, and pass it to the Java8Parser constructor.
+Then, we call the method associated to the grammar rule we are interested in, and
+get a ParseTree instance in return. Such class represents an AST.
