@@ -20,7 +20,7 @@ public class Java8ParserTest {
             + "    public int resolve(String value);\n"
             + "}\n";
             
-        Java8Lexer lexer =new Java8Lexer(new ANTLRInputStream(input));
+        Java8Lexer lexer = new Java8Lexer(new ANTLRInputStream(input));
 
         CommonTokenStream tokens = new CommonTokenStream(lexer);
 

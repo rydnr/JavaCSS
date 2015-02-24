@@ -53,7 +53,7 @@ As with any other regular Java project, we'll start by investing some time in pr
 - Write the initial Maven's pom.xml
 - Create a new Jenkins job to listen to changes on the github repository.
 
-*** First test
+*** First test: Parsing an AST
 
 The simplest test is simple: we want to verify the parser supports Java8 code and generates valid AST instances.
 Since we just use ANTLR-provided Java grammar, the purpose of this test is a simple verification of the correctness of
@@ -71,3 +71,37 @@ To write the test, we need to remember the API ANTLR provides for the generated 
 we provide the text to build a Java8Lexer. Then, we instantiate a CommonTokenStream with the lexer, and pass it to the Java8Parser constructor.
 Then, we call the method associated to the grammar rule we are interested in, and
 get a ParseTree instance in return. Such class represents an AST.
+
+After adding the required imports and dependencies, the test should pass.
+
+*** Second test
+
+What JavaCSS pursues is to aid in writing Java code, and one of such aids is freeing the developer from the task of managing
+which external classes the code uses. That will eventually require us to deal with dependency management
+(which library/framework a class belongs to, and how to make sure it is available when compiling or at runtime), but for now
+we focus on browsing the AST to retrieve all declared types.
+
+It's worth reviewing when such type declaration occurs in a Java source file:
+- parameterized class/interface definitions
+- static blocks
+- instance/class attributes
+- parameterized methods
+- method returns
+- method parameters
+- local variables in methods
+- local variables in lambdas
+
+To start simple, and to allow us to get used to traversing ASTs, method returns seem a good starting point.
+But first we need to figure out how the AST itself looks like, how to distinguish a node from another, etc.
+It seems we tried to be too ambitious in our test. Let's change it: instead of retrieving the list of declared
+types, let's first count the methods.
+
+The test means asking someone "how many methods are in this Java code?", but there's no one listening, yet.
+Even though we don't know if it'll be a wise decision, a MethodHelper class could be handy in this context:
+
+  new MethodHelper(ast).countMethods();
+
+However, at this point we need to dig deeper into how an AST looks like. From the grammar, the rule we are
+interested in is "methodDeclaration". After some debugging, we can check whether a node in the tree is
+a MethodDeclaration if its associated "payload" is of type Java8Parser.MethodDeclarationContext.
+However, we'll review this later, once we learn more about processing ASTs in ANTLR.
