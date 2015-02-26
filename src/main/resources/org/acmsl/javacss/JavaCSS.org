@@ -419,6 +419,20 @@ do the whole parsing, not just part of it.
 #             return super.visitCompilationUnit(ctx);
 #         }
 
-Now it's a little more readable, and it's parsing the import correctly with no complaints.
-Let's hope it's not too expensive in terms of performance. Clearly, we should reuse the lexer and tokens from the initial parsing stage. We'll fix it
+Now it's a little more readable, and it's parsing the import correctly with no complaints. But it still contains that redundant
+ImportDeclarationContext object that we've made up for no reason. ANTLR can handle it if we start parsing one level higher.
+
+#         @Override
+#         public CompilationUnitContext visitCompilationUnit(@org.antlr.v4.runtime.misc.NotNull final CompilationUnitContext ctx)
+#         {
+#             Java8Lexer lexer = new Java8Lexer(new ANTLRInputStream("import " + this.importType + ";"));
+#             CommonTokenStream tokens = new CommonTokenStream(lexer);
+#             Java8Parser parser = new Java8Parser(tokens);
+#             ImportDeclarationContext newImport = parser.importDeclaration();
+# 
+#             ctx.addChild(newImport);
+#             return super.visitCompilationUnit(ctx);
+#         }
+
+Now it's much better. Let's hope it's not too expensive in terms of performance. Clearly, we should reuse the lexer and tokens from the initial parsing stage. We'll fix it
 when time is ready.

@@ -86,12 +86,10 @@ public class ASTHelper
         @Override
         public CompilationUnitContext visitCompilationUnit(@org.antlr.v4.runtime.misc.NotNull final CompilationUnitContext ctx)
         {
-            ImportDeclarationContext newImport = new ImportDeclarationContext(ctx, ctx.invokingState);
             Java8Lexer lexer = new Java8Lexer(new ANTLRInputStream("import " + this.importType + ";"));
             CommonTokenStream tokens = new CommonTokenStream(lexer);
             Java8Parser parser = new Java8Parser(tokens);
-            SingleTypeImportDeclarationContext singleTypeImportDeclaration = parser.singleTypeImportDeclaration();
-            newImport.addChild(singleTypeImportDeclaration);
+            ImportDeclarationContext newImport = parser.importDeclaration();
 
             ctx.addChild(newImport);
             return super.visitCompilationUnit(ctx);
