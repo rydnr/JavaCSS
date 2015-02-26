@@ -87,16 +87,11 @@ public class ASTHelper
         public CompilationUnitContext visitCompilationUnit(@org.antlr.v4.runtime.misc.NotNull final CompilationUnitContext ctx)
         {
             ImportDeclarationContext newImport = new ImportDeclarationContext(ctx, ctx.invokingState);
-            SingleTypeImportDeclarationContext singleTypeImportDeclarationContext =
-                new SingleTypeImportDeclarationContext(newImport, newImport.invokingState);
-            newImport.addChild(singleTypeImportDeclarationContext);
-            singleTypeImportDeclarationContext.addChild(new CommonToken(Java8Parser.IMPORT, "import"));
-            Java8Lexer lexer = new Java8Lexer(new ANTLRInputStream(this.importType));
+            Java8Lexer lexer = new Java8Lexer(new ANTLRInputStream("import " + this.importType + ";"));
             CommonTokenStream tokens = new CommonTokenStream(lexer);
             Java8Parser parser = new Java8Parser(tokens);
-            TypeNameContext typeNameContext = parser.typeName();
-            singleTypeImportDeclarationContext.addChild(typeNameContext);
-            newImport.addChild(new CommonToken(Java8Parser.COLON, ";"));
+            SingleTypeImportDeclarationContext singleTypeImportDeclaration = parser.singleTypeImportDeclaration();
+            newImport.addChild(singleTypeImportDeclaration);
 
             ctx.addChild(newImport);
             return super.visitCompilationUnit(ctx);

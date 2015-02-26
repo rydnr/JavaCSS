@@ -14,12 +14,12 @@ public class Java8ParserTest {
     @Test public void can_parse_an_interface_with_extends_and_a_single_method()
         throws Exception {
         String input =
-              "public interface Resolver\n"
+            "public interface Resolver\n"
             + "    extends Serializable {\n\n"
 
             + "    public int resolve(String value);\n"
             + "}\n";
-            
+
         Java8Lexer lexer = new Java8Lexer(new ANTLRInputStream(input));
 
         CommonTokenStream tokens = new CommonTokenStream(lexer);

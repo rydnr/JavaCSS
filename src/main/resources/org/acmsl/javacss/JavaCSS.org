@@ -401,5 +401,24 @@ But wait! Our grammar should handle that, we only need to parse our type, callin
 #             return super.visitCompilationUnit(ctx);
 #         }
 
-Let's hope it's not too expensive. Clearly, we should reuse the lexer and tokens from the initial parsing stage. We'll fix it
+The test now passes, but when debugging I saw something suspicious: an error message was logged in the console, and one
+node in the tree was referencing an exception. Then, reviewing the code, I decided it was much clearer if I let ANTLR
+do the whole parsing, not just part of it.
+
+#         @Override
+#         public CompilationUnitContext visitCompilationUnit(@org.antlr.v4.runtime.misc.NotNull final CompilationUnitContext ctx)
+#         {
+#             ImportDeclarationContext newImport = new ImportDeclarationContext(ctx, ctx.invokingState);
+#             Java8Lexer lexer = new Java8Lexer(new ANTLRInputStream("import " + this.importType + ";"));
+#             CommonTokenStream tokens = new CommonTokenStream(lexer);
+#             Java8Parser parser = new Java8Parser(tokens);
+#             SingleTypeImportDeclarationContext singleTypeImportDeclaration = parser.singleTypeImportDeclaration();
+#             newImport.addChild(singleTypeImportDeclaration);
+# 
+#             ctx.addChild(newImport);
+#             return super.visitCompilationUnit(ctx);
+#         }
+
+Now it's a little more readable, and it's parsing the import correctly with no complaints.
+Let's hope it's not too expensive in terms of performance. Clearly, we should reuse the lexer and tokens from the initial parsing stage. We'll fix it
 when time is ready.
