@@ -40,10 +40,7 @@ package org.acmsl.javacss.java8.parser;
  */
 import org.acmsl.javacss.java8.parser.Java8Parser.CompilationUnitContext;
 import org.acmsl.javacss.java8.parser.Java8Parser.ImportDeclarationContext;
-import org.acmsl.javacss.java8.parser.Java8Parser.SingleTypeImportDeclarationContext;
-import org.acmsl.javacss.java8.parser.Java8Parser.TypeNameContext;
 import org.antlr.v4.runtime.ANTLRInputStream;
-import org.antlr.v4.runtime.CommonToken;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.tree.ParseTree;
 

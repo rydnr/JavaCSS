@@ -1,5 +1,6 @@
 package org.acmsl.javacss.java8.parser;
 
+import org.antlr.v4.runtime.BailErrorStrategy;
 import org.junit.Test;
 import org.junit.Assert;
 import org.junit.runner.RunWith;
@@ -25,6 +26,7 @@ public class Java8ParserTest {
         CommonTokenStream tokens = new CommonTokenStream(lexer);
 
         Java8Parser parser = new Java8Parser(tokens);
+        parser.setErrorHandler(new BailErrorStrategy());
         ParseTree ast = parser.compilationUnit();
         Assert.assertNotNull(ast);
     }

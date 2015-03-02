@@ -303,9 +303,11 @@ Now that the test looks fine, we can proceed to defining the required skeleton a
 #    }
 
 Unfortunately, it fails with an unexpected exception:
+
     java.lang.IllegalArgumentException: import at index 2 isn't a valid rule name
 	at org.antlr.v4.runtime.tree.xpath.XPath.getXPathElement(XPath.java:175)
 	at org.antlr.v4.runtime.tree.xpath.XPath.split(XPath.java:122)
+
 Maybe we chose an invalid XPath selector. Yes, we did. The grammar rule is not "import", but "importDeclaration".
 Now the test fails as it should, which allows us to move forward. The idea is to implement a visitor for the rule where
 an "importDeclaration" occurs, and add the new subtree therein. Honestly, I didn't know how to do it, so I ended up
@@ -339,7 +341,7 @@ adding a subtree which seemed good enough, but it was made up completely. It pas
 #    }
 
 It was a start. But how to be sure our new tree is equivalent to a tree as if it was parsed by ANTLR? By looking at the grammar.
-In our current code, we are not respecting the grammar rules. Our import type must by represented by a tree of typeNameContext.
+In our current code, we are not respecting the grammar rules. Our import type must be represented by a tree of typeNameContext.
 
 # graph antlr_tree {
 #   label="ANTLR Parse Tree for Java8.g4"
@@ -436,3 +438,530 @@ ImportDeclarationContext object that we've made up for no reason. ANTLR can hand
 
 Now it's much better. Let's hope it's not too expensive in terms of performance. Clearly, we should reuse the lexer and tokens from the initial parsing stage. We'll fix it
 when time is ready.
+
+*** Fifth test: Generating code
+
+So far we've got ourselves familiar with the first two steps in the process: reading source code, and manipulating it. Now it's time to
+work on generating code from an AST.
+
+Needless to say, we'll use StringTemplate. It's the natural counterpart of ANTLR, it is easy to learn, and promotes good habits.
+In our situation, we are trying to answer the question "how can I generate Java sources?", but that's overly ambitious for a
+first test.
+
+On the top of my mind, I dream of finding a way to somehow mirror a grammar automatically. Let's consider the following rules from our grammar:
+
+  packageDeclaration
+	:	packageModifier* 'package' Identifier ('.' Identifier)* ';'
+	;
+
+  packageModifier
+	:	annotation
+	;
+
+  annotation
+	:	normalAnnotation
+	|	markerAnnotation
+	|	singleElementAnnotation
+	;
+
+  normalAnnotation
+	:	'@' typeName '(' elementValuePairList? ')'
+	;
+
+  markerAnnotation
+	:	'@' typeName
+	;
+
+  singleElementAnnotation
+	:	'@' typeName '(' elementValue ')'
+	;
+
+  typeName
+	:	Identifier
+	|	packageOrTypeName '.' Identifier
+	;
+
+  packageOrTypeName
+	:	Identifier
+	|	packageOrTypeName '.' Identifier
+	;
+
+  elementValuePairList
+	:	elementValuePair (',' elementValuePair)*
+	;
+
+  elementValuePair
+	:	Identifier '=' elementValue
+	;
+
+  elementValue
+	:	conditionalExpression
+	|	elementValueArrayInitializer
+	|	annotation
+	;
+
+We could think of analogous StringTemplate rules:
+
+  packageDeclaration(modifiers, identifier, extraIdentifiers) ::= <<
+  <modifiers:{ m | <packageModifier(mod=m)>}; separator=" "> package <identifier><extraIdentifiers:{ e | .<e>}>;
+  >>
+
+  packageModifier(mod) ::= <<
+  <annotation(a=mod)>
+  >>
+
+  annotation(a) ::= <<
+  <if(a.normal)><
+    normalAnnotation(a=a)><
+  else><
+    if(a.marker)><
+      markerAnnotation(a=a)><
+    else><
+      singleElementAnnotation(a=a)><
+    endif><
+  endif>
+  >>
+
+  normalAnnotation(a) ::= <<
+  @<typeName(i=a)>(<if(a.elementValuePairList)><a.elementValuePairList:{ p |<elementValuePairList(pair=p)>}><endif>)
+  >>
+
+  markerAnnotation(a) ::= <<
+  @<typeName(i=a)>
+  >>
+  
+  singleElementAnnotation(a) ::= <<
+  @<typeName(i=a)>(<a.elementValue>)
+  >>
+
+  typeName(i, p) ::= <<
+  <if(p)><p>.<i><else><i><endif>
+  >>
+
+  packageOrTypeName(i, p) ::= << <! it's the same as typeName !>
+  <if(p)><p>.<i><else><i><endif>
+  >>
+
+  elementValuePairList(pair) ::= <<
+  <pair:{ p |<elementValuePair(i=p.identifier, v=p.elementValue)>}; separator=",">
+  >>
+
+  elementValuePair(p, v) ::= <<
+  <i>=<elementValue(v=v)>
+  >>
+
+  elementValue(v) ::= <<
+  <if(v.conditionalExpression)><
+    conditionalExpression(e=v)><
+  else><
+    if(v.elementValueArrayInitializer)><
+      elementValueArrayInitializer(i=v)><
+    else><
+      annotation(a=v)><
+    endif><
+  endif>
+  >>
+
+I hope you get the idea. There seems to exist an automatically-generated template set for a given ANTLR grammar, given the AST/ParseTree
+provides getters for each subtree, so StringTemplate can access them.
+But don't have that ANTLR->StringTemplate conversion, and still we want to generate code from a AST modelling a Java source file.
+I see two options: either build that tool ourselves, or build the StringTemplate templates we need for our particular purpose.
+Let's explore both options in detail.
+
+- Option A: Build an ANTLR->StringTemplate translator
+
+We're pretty confident that, for a clean (no semantic predicates, no embedded logic) ANTLR grammar, there exist a
+set of StringTemplate templates which can generate valid input for such grammar.
+
+Such translator would involve:
+a) An ANTLR meta-parser, which reads an ANTLR grammar and generates the StringTemplate templates.
+b) An AST runtime decorator, which lets StringTemplate access the child nodes via getters.
+
+- Option B: Hand-code the templates for Java8.g4
+
+We've already felt the pain, above. Counting the parser rules gives us an astounding 271 rules. Of course, we could
+reduce that number to certain extent. But it's a lot of work indeed. Besides that, our work is not usable for other languages
+in the future, and forces us maintaining the generator manually.
+
+So given this scenario, what would you decide? Each option has pros and cons. If we apply Lean philosophy, we should try to
+obtain feedback as soon as possible, regardless of the option. Under that perspective, let's review the actual hypothesis behind
+each option.
+
+- Hypothesis for A: the automatic generation is feasible for any grammar, given it doesn't include logic or semantic predicates.
+
+How could we possibly validate the hypothesis? If it doesn't hold, the whole point of building a generator is unclear. We can inspect
+some grammars already available for ANTLR, to check for some situations which were not anticipated.
+
+- Hypothesis for B: A custom generator for Java8.g4 is doable for sure, but it'll take a lot of time, and we'll have to write tests for
+lots of language constructs.
+
+How long would it be? Hours? Days? We could implement just the templates above, for the "package" rule, and with that information
+try to estimate the whole grammar.
+
+** Pivoting the prototype
+
+We could discuss each of the options endlessly, and still miss the important challenge we are actually facing. We want to implement
+a way to customize certain aspects and behavior of the generation templates, ortogonally to the templates themselves. It makes
+much more sense to focus on that particular problem, than whether we can automate default templates from grammars.
+
+*** Background
+
+Let's start with the same template to output Java package declarations:
+
+  packageDeclaration(modifiers, identifier, extraIdentifiers) ::= <<
+  <modifiers:{ m | <packageModifier(mod=m)>}; separator=" "> package <identifier><extraIdentifiers:{ e | .<e>}>;
+  >>
+
+That template is saying:
+- If there're any package modifiers, then run the "packageModifier" template for each of them, using a blank space
+as separator.
+- Append a blank space.
+- Add the "package" word.
+- Append the identifier value.
+- If there're any extra identifiers (the package is part of a tree), then append each part, preceded by a dot.
+- Append a semicolon.
+- Append a new line.
+
+We'd like to be able to change how the template behaves:
+- The separator used when calling "packageModifier" templates.
+- The blank space.
+- The "package" word.
+- The identifier value.
+- The separator used when calling the anonymous template.
+- The semicolon.
+- The new line.
+
+Let's try to define selectors for each one of the identified elements:
+- .packageDeclaration .packageModifiers : To overwrite the "separator" directive.
+- .packageDeclaration "package"::before : To tune the blank space before the "package".
+- .packageDeclaration #identifier : to modify the way the identifier value is printed.
+- .packageDeclaration #extraIdentifiers : again, needed to overwrite the separator.
+- .packageDeclaration ";"::before : to optionally add text before the semicolon.
+- .packageDeclaration ";" "\s*" : to change whether there's a new line after the semicolon.
+
+This is just an initial example, trying to adapt the standard [[http://www.w3.org/TR/2011/REC-css3-selectors-20110929/][CSS selectors]] to this scenario. What we are doing here is
+modeling the template itself as a DOM or AST, and filtering certain nodes or properties of such tree. But before worrying
+about that, we need to implement a DSL for the new CSS-like grammar. And that requires us to go on with our initial
+outline of what we'd like to build.
+
+The next piece in the puzzle is defining the CSS-like properties to apply to the nodes matched by the selectors.
+If we wanted to use two spaces after the "package" word, and two new lines after the semicolon, we would write it as follows:
+
+  .packageDeclaration #identifier::before {
+    content: "  ";
+  }
+
+  .packageDeclaration ";"::after {
+    content: "\n\n";
+  }
+
+CSS Text defines certain properties we could reuse, but only to a certain extent, since their meaning and units are
+not compatible in some cases.
+
+Anyway, let's try to implement such DSL, starting with a test.
+
+*** First test: Parsing the CSS-like DSL
+
+This first test consists of invoking logic on a new StringTemplateCSSParser class to parse the above examples. The output
+will consist of a list, and a map of maps. A list since the selectors are an ordered collection of items, with precedence semantics.
+A map since the properties are a flattened JSON-like structure of key-value tuples.
+
+#    @Test
+#    public void parses_a_simple_input() {
+#        String input =
+#            ".packageDeclaration #identifier::before {\n"
+#          + "    content: \"  \";\n"
+#          + "}\n";
+#
+#        StringTemplateCSSLexer lexer = new StringTemplateCSSLexer(new ANTLRInputStream(input));
+#
+#        CommonTokenStream tokens = new CommonTokenStream(lexer);
+#
+#        StringTemplateCSSParser parser = new StringTemplateCSSParser(tokens);
+#        ParseTree ast = parser.css();
+#        Assert.assertNotNull(ast);
+#    }
+
+As for the grammar itself, we can reuse the Java8 one, removing almost all the parser rules, and keeping the some of the lexer
+ones.
+
+#   css
+#   	:	selector+ '{' property+ '}' EOF
+#   	;
+#   
+#   selector
+#   	:	('.' | '#') Identifier (':' ':' ('before' | 'after'))?
+#   	;
+#   
+#   property
+#   	:	Identifier ':' StringLiteral ';'
+#   	;
+#   
+#   StringLiteral
+#   	:	'"' StringCharacters? '"' | '\'' StringCharacters? '\''
+#   	;
+#   
+#   fragment
+#   StringCharacters
+#   	:	StringCharacter+
+#   	;
+#   
+#   fragment
+#   StringCharacter
+#   	:	~["\\]
+#   	|	EscapeSequence
+#   	;
+#   
+#   // §3.10.6 Escape Sequences for Character and String Literals
+#   
+#   fragment
+#   EscapeSequence
+#   	:	'\\' [btnfr"'\\]
+#   	|	OctalEscape
+#      |   UnicodeEscape // This is not in the spec but prevents having to preprocess the input
+#   	;
+#   
+#   fragment
+#   OctalEscape
+#   	:	'\\' OctalDigit
+#   	|	'\\' OctalDigit OctalDigit
+#   	|	'\\' ZeroToThree OctalDigit OctalDigit
+#   	;
+#   
+#   fragment
+#   OctalDigit
+#   	:	[0-7]
+#   	;
+#   
+#   fragment
+#   ZeroToThree
+#   	:	[0-3]
+#   	;
+#   
+#   // This is not in the spec but prevents having to preprocess the input
+#   fragment
+#   UnicodeEscape
+#       :   '\\' 'u' HexDigit HexDigit HexDigit HexDigit
+#       ;
+#   
+#   fragment
+#   HexDigit
+#   	:	[0-9a-fA-F]
+#   	;
+#   
+#   LBRACE : '{';
+#   RBRACE : '}';
+#   LBRACK : '[';
+#   RBRACK : ']';
+#   SEMI : ';';
+#   COMMA : ',';
+#   DOT : '.';
+#   
+#   GT : '>';
+#   LT : '<';
+#   TILDE : '~';
+#   COLON : ':';
+#   MUL : '*';
+#   COLONCOLON : '::';
+#   
+#   // §3.8 Identifiers (must appear after all keywords in the grammar)
+#   
+#   Identifier
+#   	:	JavaLetter JavaLetterOrDigit*
+#   	;
+#   
+#   fragment
+#   JavaLetter
+#   	:	[a-zA-Z$_] // these are the "java letters" below 0xFF
+#   	|	// covers all characters above 0xFF which are not a surrogate
+#   		~[\u0000-\u00FF\uD800-\uDBFF]
+#   		{Character.isJavaIdentifierStart(_input.LA(-1))}?
+#   	|	// covers UTF-16 surrogate pairs encodings for U+10000 to U+10FFFF
+#   		[\uD800-\uDBFF] [\uDC00-\uDFFF]
+#   		{Character.isJavaIdentifierStart(Character.toCodePoint((char)_input.LA(-2), (char)_input.LA(-1)))}?
+#   	;
+#   
+#   fragment
+#   JavaLetterOrDigit
+#   	:	[a-zA-Z0-9$_] // these are the "java letters or digits" below 0xFF
+#   	|	// covers all characters above 0xFF which are not a surrogate
+#   		~[\u0000-\u00FF\uD800-\uDBFF]
+#   		{Character.isJavaIdentifierPart(_input.LA(-1))}?
+#   	|	// covers UTF-16 surrogate pairs encodings for U+10000 to U+10FFFF
+#   		[\uD800-\uDBFF] [\uDC00-\uDFFF]
+#   		{Character.isJavaIdentifierPart(Character.toCodePoint((char)_input.LA(-2), (char)_input.LA(-1)))}?
+#   	;
+#   
+#   AT : '@';
+#   ELLIPSIS : '...';
+#   
+#   //
+#   // Whitespace and comments
+#   //
+#   
+#   WS  :  [ \t\r\n\u000C]+ -> skip
+#       ;
+#   
+#   COMMENT
+#       :   '/*' .*? '*/' -> skip
+#       ;
+#   
+#   LINE_COMMENT
+#       :   '//' ~[\r\n]* -> skip
+#       ;
+
+Our test succeeds. We can live with that "Java" rules in the lexer, since they probably hold true for the CSS
+specification we are trying to emulate as accurate as possible.
+
+Let's check if the other input we wrote before is parsed correctly as well:
+
+#       @Test
+#       public void parses_another_simple_input() {
+#           String input =
+#                 "  .packageDeclaration \";\"::after {\n"
+#               + "    content: \"\\n\\n\";\n"
+#               + "  }";
+#   
+#           StringTemplateCSSLexer lexer = new StringTemplateCSSLexer(new ANTLRInputStream(input));
+#   
+#           CommonTokenStream tokens = new CommonTokenStream(lexer);
+#   
+#           StringTemplateCSSParser parser = new StringTemplateCSSParser(tokens);
+#           ParseTree ast = parser.css();
+#           Assert.assertNotNull(ast);
+#       }
+
+The test passes, but ANTLR complains in the console. There're two issues: first, the grammar is not parsing the input correctly; second, the test (and the previous one as well) doesn't
+detect when the parsing is failing.
+
+#   Running org.acmsl.javacss.css.parser.StringTemplateCSSParserTest
+#   line 1:31 extraneous input '::' expecting {'#', '{', '.'}
+#   line 1:22 extraneous input '";"' expecting {'#', '{', '.'}
+#   Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 sec - in org.acmsl.javacss.css.parser.StringTemplateCSSParserTest
+
+For now, it's more important to fix the tests. Changing the ErrorHandler to a less permissive strategy is exactly what we look for.
+
+#        parser.setErrorHandler(new BailErrorStrategy());
+
+Now the tests fail as they should, we deal with why the grammar doesn't expect "::" in the first test. The second part of the selector, #identifier::before, is not a valid selector according to our grammar.
+The problem was that we described the consecutive colons as two tokens, whereas the lexer identified them as COLONCOLON:
+
+#   selector
+#   	:	('.' | '#') Identifier (COLONCOLON ('before' | 'after'))?
+#   	;
+
+That fixes the first test. The second input is clearly not supported by our current grammar. We'll need to implement it, but it is not difficult.
+
+#   selector
+#   	:	('.' | '#')? (Identifier | StringLiteral) (COLONCOLON ('before' | 'after'))?
+#   	;
+
+*** Second test: Reading properties
+
+Next, we want to define how to retrieve the properties associated to a selector. As before, we'll start with a simple helper which uses
+the ANTLR-generated parser and provides the two collections we need: the list of selectors, and a Map of Maps containing the properties for each selector.
+We'll envelop this in a StringTemplateCSSHelper class for now.
+
+#       @Test
+#       public void retrieves_selectors_for_a_simple_input()
+#       {
+#           String input =
+#               ".packageDeclaration #identifier::before {\n"
+#               + "    content: \"  \";\n"
+#               + "}\n";
+#   
+#           StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input);
+#   
+#           List<String> selectors = helper.getSelectors();
+#   
+#           Assert.assertNotNull(selectors);
+#   
+#           Assert.assertEquals(1, selectors.size());
+#   
+#           Assert.assertEquals(".packageDeclaration #identifier::before", selectors.get(0));
+#       }
+
+We can now proceed writing the skeleton of the class to ensure the code compiles.
+
+#   public class StringTemplateCSSHelper
+#   {
+#       private final String input;
+#       private List<String> selectors = new ArrayList<String>();
+#   
+#       public StringTemplateCSSHelper(final String input)
+#       {
+#           this.input = input;
+#       }
+#   
+#       public List<String> getSelectors()
+#       {
+#           return this.selectors;
+#       }
+#   }
+
+Now that we have our beloved red light, we can try to implement the logic. Notice I'm bypassing the "dumb" implementation here. Anyway, my first attempt wasn't much better either.
+
+#       public List<String> getSelectors()
+#       {
+#           if (this.selectors == null)
+#           {
+#               initialize(this.input);
+#           }
+#           
+#           return this.selectors;
+#       }
+#   
+#       protected void initialize(String input)
+#       {
+#           StringTemplateCSSLexer lexer = new StringTemplateCSSLexer(new ANTLRInputStream(input));
+#   
+#           CommonTokenStream tokens = new CommonTokenStream(lexer);
+#   
+#           StringTemplateCSSParser parser = new StringTemplateCSSParser(tokens);
+#   
+#           ParseTree tree = parser.css();
+#   
+#           Collection<ParseTree> selectorEntries = XPath.findAll(tree, "//selector", parser);
+#   
+#           this.selectors = new ArrayList<String>(selectorEntries.size());
+#   
+#           for (ParseTree selectorEntry : selectorEntries)
+#           {
+#               this.selectors.add(selectorEntry.getText());
+#           }
+#       }
+
+The test doesn't pass because it expects just one selector, and the helper is returning two. And we're returning two
+because it's what the grammar dictates. For now, I feel more confortable with the idea that each block belongs
+to one selector, even though it's not really true. It's the combination of selectors (and some relationships among them) what allow us
+to match certain pieces of each template. But again, we'll leave that for later. Meanwhile, let's update the grammar to
+wrap all selectors into one.
+
+#   css
+#   	:	selectorCombination '{' property+ '}' EOF
+#   	;
+#   
+#   selectorCombination
+#   	:	selector+
+#   	;
+
+Voilà! It did the trick, although the test is not passing yet, but this time is the test's fault.
+
+#   retrieves_selectors_for_a_simple_input(org.acmsl.javacss.css.StringTemplateCSSHelperTest)  Time elapsed: 0.002 sec  <<< FAILURE!
+#   org.junit.ComparisonFailure: expected:<.packageDeclaration[ ]#identifier::before> but was:<.packageDeclaration[]#identifier::before>
+#           at org.junit.Assert.assertEquals(Assert.java:115)
+#           at org.junit.Assert.assertEquals(Assert.java:144)
+#           at org.acmsl.javacss.css.StringTemplateCSSHelperTest.retrieves_selectors_for_a_simple_input(StringTemplateCSSHelperTest.java:70)
+
+In our test, we are calling getText() on non-terminal nodes of our ParseTree. In our grammar the whitespace is not meaningful, so it's
+discarded by the lexer and omitted in the token stream and in the final tree. Therefore it's not returning the same input text, and
+we have to take it into account in our checks.
+
+#       @Test
+#       public void retrieves_selectors_for_a_simple_input()
+#       {
+#           [..]
+#   
+#           Assert.assertEquals(".packageDeclaration#identifier::before", selectors.get(0));
+#       }
+
