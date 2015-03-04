@@ -35,12 +35,20 @@
  */
 package org.acmsl.javacss.css;
 
+import org.acmsl.javacss.java8.parser.Java8Lexer;
+import org.acmsl.javacss.java8.parser.Java8Parser;
+import org.antlr.v4.runtime.CommonTokenStream;
+import org.antlr.v4.runtime.ANTLRInputStream;
+import org.antlr.v4.runtime.tree.ParseTree;
+import org.antlr.v4.runtime.tree.xpath.XPath;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Tests for {@link StringTemplateCSSHelper}.
@@ -61,12 +69,130 @@ public class StringTemplateCSSHelperTest
 
         StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input);
 
-        List<String> selectors = helper.getSelectors();
+        List<List<String>> selectorCombinations = helper.getSelectors();
+
+        Assert.assertNotNull(selectorCombinations);
+
+        Assert.assertEquals(1, selectorCombinations.size());
+
+        List<String> selectors = selectorCombinations.get(0);
+        Assert.assertEquals(2, selectors.size());
+
+        Assert.assertEquals(".packageDeclaration", selectors.get(0));
+        Assert.assertEquals("#identifier::before", selectors.get(1));
+    }
+
+    protected void multipleBlockSelectorTests(int count)
+    {
+        StringBuilder input = new StringBuilder();
+
+        for (int index = 0; index < count; index++)
+        {
+            input.append(".packageDeclaration #identifier");
+            input.append(index);
+            input.append("::before {\n    content: \"  \";\n}\n\n");
+        }
+
+        StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input.toString());
+
+        List<List<String>> selectorCombinations = helper.getSelectors();
+
+        Assert.assertNotNull(selectorCombinations);
+
+        Assert.assertEquals(count, selectorCombinations.size());
+
+        for (int index = 0; index < count; index++)
+        {
+            List<String> selectors = selectorCombinations.get(index);
+
+            Assert.assertEquals(".packageDeclaration", selectors.get(0));
+            Assert.assertEquals("#identifier" + index + "::before", selectors.get(1));
+        }
+    }
+
+    @Test
+    public void retrieves_selectors_for_an_input_with_several_blocks()
+    {
+        multipleBlockSelectorTests((int) (Math.random() * 10));
+    }
+
+    protected void multipleBlockPropertyTests(int count)
+    {
+        StringBuilder input = new StringBuilder();
+
+        for (int index = 0; index < count; index++)
+        {
+            input.append(".packageDeclaration #identifier");
+            input.append(index);
+            input.append("::before {\n");
+            input.append("    content: \"");
+            input.append(index);
+            input.append("\";\n");
+            input.append("}\n");
+        }
+
+        StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input.toString());
+
+        List<List<String>> selectors = helper.getSelectors();
 
         Assert.assertNotNull(selectors);
 
-        Assert.assertEquals(1, selectors.size());
+        Assert.assertEquals(count, selectors.size());
 
-        Assert.assertEquals(".packageDeclaration#identifier::before", selectors.get(0));
+        for (int index = 0; index < count; index++)
+        {
+            Map<String, String> properties = helper.getProperties(selectors.get(index));
+
+            Assert.assertNotNull(properties);
+
+            Assert.assertEquals(1, properties.size());
+
+            Assert.assertTrue(properties.containsKey("content"));
+            Assert.assertEquals("\"" + index + "\"", properties.get("content"));
+        }
+    }
+
+    @Test
+    public void retrieves_properties_for_a_simple_input()
+    {
+        multipleBlockPropertyTests(1);
+    }
+
+    @Test
+    public void retrieves_properties_for_an_input_with_multiple_blocks()
+    {
+        multipleBlockPropertyTests((int) (Math.random() * 10) + 1);
+    }
+
+//    @Test
+    public void finds_the_matching_selector()
+    {
+        String javaInput = "package com.foo.bar;";
+
+        String cssInput =
+              ".packageDeclaration \";\"::before {\n"
+            + "   content: \" \";\n"
+            + "}\n";
+
+        StringTemplateCSSHelper helper = new StringTemplateCSSHelper(cssInput);
+
+        Java8Lexer lexer = new Java8Lexer(new ANTLRInputStream(javaInput));
+        CommonTokenStream tokens = new CommonTokenStream(lexer);
+        Java8Parser parser = new Java8Parser(tokens);
+        ParseTree ast = parser.compilationUnit();
+
+        Collection<ParseTree> matches = XPath.findAll(ast, "//';'", parser);
+
+        Assert.assertNotNull(matches);
+        Assert.assertEquals(1, matches.size());
+
+        ParseTree semiColon = matches.toArray(new ParseTree[1])[0];
+        Assert.assertNotNull(semiColon);
+
+        String matchedSelectors = helper.retrieveMatchingSelectors(semiColon);
+
+        Assert.assertNotNull(matchedSelectors);
+        Assert.assertEquals(".packageDeclaration \";\"::before", matchedSelectors);
     }
 }
+

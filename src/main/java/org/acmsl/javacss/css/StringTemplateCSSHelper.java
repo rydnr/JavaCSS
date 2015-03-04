@@ -38,10 +38,14 @@ package org.acmsl.javacss.css;
 /*
  * Importing JetBrains annotations.
  */
+import org.acmsl.javacss.css.parser.StringTemplateCSSBaseVisitor;
 import org.acmsl.javacss.css.parser.StringTemplateCSSLexer;
 import org.acmsl.javacss.css.parser.StringTemplateCSSParser;
+import org.acmsl.javacss.css.parser.StringTemplateCSSParser.PropertyContext;
+import org.acmsl.javacss.css.parser.StringTemplateCSSVisitor;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.ANTLRInputStream;
+import org.antlr.v4.runtime.misc.NotNull;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.xpath.XPath;
 
@@ -52,7 +56,9 @@ import org.checkthread.annotations.ThreadSafe;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  *
@@ -64,14 +70,15 @@ import java.util.List;
 public class StringTemplateCSSHelper
 {
     private final String input;
-    private List<String> selectors;
+    private List<List<String>> selectors;
+    private Map<List<String>, Map<String, String>> properties;
 
     public StringTemplateCSSHelper(final String input)
     {
         this.input = input;
     }
 
-    public List<String> getSelectors()
+    public List<List<String>> getSelectors()
     {
         if (this.selectors == null)
         {
@@ -91,13 +98,88 @@ public class StringTemplateCSSHelper
 
         ParseTree tree = parser.css();
 
-        Collection<ParseTree> selectorEntries = XPath.findAll(tree, "//selectorCombination", parser);
+        Collection<ParseTree> selectorCombinations = XPath.findAll(tree, "//selectorCombination", parser);
 
-        this.selectors = new ArrayList<String>(selectorEntries.size());
+        this.selectors = new ArrayList<List<String>>(selectorCombinations.size());
+        this.properties = new HashMap<List<String>, Map<String, String>>();
 
-        for (ParseTree selectorEntry : selectorEntries)
+        for (ParseTree selectorCombination : selectorCombinations)
         {
-            this.selectors.add(selectorEntry.getText());
+            List<String> currentSelectors = new ArrayList<String>(selectorCombination.getChildCount());
+            this.selectors.add(currentSelectors);
+
+            for (int index = 0; index < selectorCombination.getChildCount(); index++)
+            {
+                String text = selectorCombination.getChild(index).getText();
+                currentSelectors.add(text);
+            }
+            Map<String, String> block = retrieveProperties(selectorCombination, parser);
+
+            this.properties.put(currentSelectors, block);
+        }
+    }
+
+    protected Map<String, String> retrieveProperties(ParseTree selectorEntry, StringTemplateCSSParser parser)
+    {
+        Map<String, String> result;
+
+        Collection<ParseTree> properties = findPropertyNodes(selectorEntry);
+
+        result = new HashMap<String, String>(properties.size());
+
+        for (ParseTree property : properties)
+        {
+            String key = property.getChild(0).getText();
+            String value = property.getChild(2).getText();
+            result.put(key, value);
+        }
+
+        return result;
+    }
+
+    protected Collection<ParseTree> findPropertyNodes(final ParseTree selectorEntry)
+    {
+        ParseTree parent = selectorEntry.getParent();
+        PropertyVisitor visitor = new PropertyVisitor(selectorEntry.getParent());
+        parent.accept(visitor);
+
+        return visitor.properties;
+    }
+
+    public Map<String, String> getProperties(List<String> selector)
+    {
+        if (this.properties == null)
+        {
+            initialize(this.input);
+        }
+
+        return this.properties.get(selector);
+    }
+
+    public String retrieveMatchingSelectors(ParseTree semiColon)
+    {
+        return null;
+    }
+
+    protected static class PropertyVisitor
+        extends StringTemplateCSSBaseVisitor<ParseTree>
+    {
+        final List<ParseTree> properties = new ArrayList<ParseTree>();
+        final ParseTree parent;
+
+        public PropertyVisitor(final ParseTree parent)
+        {
+            this.parent = parent;
+        }
+
+        @Override
+        public ParseTree visitProperty(@NotNull final PropertyContext ctx)
+        {
+            if (ctx.getParent() == this.parent)
+            {
+                this.properties.add(ctx);
+            }
+            return super.visitProperty(ctx);
         }
     }
 }

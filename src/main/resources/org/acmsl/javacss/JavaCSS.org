@@ -637,7 +637,7 @@ Let's try to define selectors for each one of the identified elements:
 - .packageDeclaration #identifier : to modify the way the identifier value is printed.
 - .packageDeclaration #extraIdentifiers : again, needed to overwrite the separator.
 - .packageDeclaration ";"::before : to optionally add text before the semicolon.
-- .packageDeclaration ";" "\s*" : to change whether there's a new line after the semicolon.
+- .packageDeclaration ";" "s*" : to change whether there's a new line after the semicolon.
 
 This is just an initial example, trying to adapt the standard [[http://www.w3.org/TR/2011/REC-css3-selectors-20110929/][CSS selectors]] to this scenario. What we are doing here is
 modeling the template itself as a DOM or AST, and filtering certain nodes or properties of such tree. But before worrying
@@ -652,7 +652,7 @@ If we wanted to use two spaces after the "package" word, and two new lines after
   }
 
   .packageDeclaration ";"::after {
-    content: "\n\n";
+    content: "[newline][newline]";
   }
 
 CSS Text defines certain properties we could reuse, but only to a certain extent, since their meaning and units are
@@ -856,9 +856,9 @@ That fixes the first test. The second input is clearly not supported by our curr
 #   	:	('.' | '#')? (Identifier | StringLiteral) (COLONCOLON ('before' | 'after'))?
 #   	;
 
-*** Second test: Reading properties
+*** Second test: Listing selectors
 
-Next, we want to define how to retrieve the properties associated to a selector. As before, we'll start with a simple helper which uses
+Next, we want to define how to list all selectors defined. As before, we'll start with a simple helper which uses
 the ANTLR-generated parser and provides the two collections we need: the list of selectors, and a Map of Maps containing the properties for each selector.
 We'll envelop this in a StringTemplateCSSHelper class for now.
 
@@ -965,3 +965,855 @@ we have to take it into account in our checks.
 #           Assert.assertEquals(".packageDeclaration#identifier::before", selectors.get(0));
 #       }
 
+We should extend this test to verify it is prepared for input containing more than one block.
+
+It's easy to make the test generic and don't assume a fixed number of blocks, at the cost of making
+the test non-deterministic.
+
+#    protected void multipleBlockTests(int count)
+#    {
+#        StringBuilder input =
+#            new StringBuilder(".packageDeclaration #identifier");
+#
+#        for (int index = 0; index < count; index++)
+#        {
+#            input.append("::before {\n    content: \"  \";\n}\n");
+#        }
+#
+#        StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input.toString());
+#
+#        List<String> selectors = helper.getSelectors();
+#
+#        Assert.assertNotNull(selectors);
+#
+#        Assert.assertEquals(count, selectors.size());
+#
+#        for (int index = 0; index < count; index++)
+#        {
+#            Assert.assertEquals(".packageDeclaration#identifier" + index + "::before", selectors.get(index));
+#        }
+#    }
+#
+#    @Test
+#    public void retrieves_selectors_for_an_input_with_several_blocks()
+#    {
+#        multipleBlockTests((int) (Math.random() * 10));
+#    }
+
+However, the input we are building to test our helper is not valid. It generates texts like
+
+.packageDeclaration #identifier::before {
+    content: "  ";
+}
+
+::before {
+    content: "  ";
+}
+
+I forgot the ".packageDeclaration #identifier" part, and we'd better off appending the count to make rules different from each another.
+
+#    protected void multipleBlockTests(int count)
+#    {
+#        StringBuilder input = new StringBuilder();
+#
+#        for (int index = 0; index < count; index++)
+#        {
+#            input.append(".packageDeclaration #identifier");
+#            input.append(index);
+#            input.append("::before {\n    content: \"  \";\n}\n\n");
+#        }
+#
+#        StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input.toString());
+#
+#        List<String> selectors = helper.getSelectors();
+#
+#        Assert.assertNotNull(selectors);
+#
+#        Assert.assertEquals(count, selectors.size());
+#
+#        for (int index = 0; index < count; index++)
+#        {
+#            Assert.assertEquals(".packageDeclaration#identifier" + index + "::before", selectors.get(index));
+#        }
+#    }
+
+Now some tests pass, some doesn't. For a count of 2 it doesn't work. Let's force that test to dig into the issue. The input we are parsing is:
+
+# .packageDeclaration #identifier0::before {
+#     content: "  ";
+# }
+# 
+# .packageDeclaration #identifier1::before {
+#     content: "  ";
+# }
+
+Here's the mismatched input error: 
+
+Running org.acmsl.javacss.css.parser.StringTemplateCSSParserTest
+line 5:0 mismatched input '.' expecting <EOF>
+
+If we review our grammar, the problem is obvious. The "css" rule is expecting just one block, so let's make it recursive.
+
+# css
+# 	:	selectorCombination '{' property+ '}' css* EOF
+# 	;
+
+Now it works, so let's revert the test to a random number of blocks.
+
+Our current "multipleBlockTests" method should be "multipleBlockSelectorTests" instead, so let's change that first.
+
+#     protected void multipleBlockSelectorTests(int count)
+#     {
+#         [..]
+#     }
+
+
+*** Third test: Reading properties
+
+Next, we want to define how to retrieve the properties associated to a selector. A basic test would simply ask for all properties contained in a block, and verify its contents. 
+
+#     @Test
+#     public void retrieves_properties_for_a_simple_input()
+#     {
+#         String input =
+#             ".packageDeclaration #identifier::before {\n"
+#             + "    content: \"  \";\n"
+#             + "}\n";
+# 
+#         StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input);
+# 
+#         List<String> selectors = helper.getSelectors();
+# 
+#         Assert.assertNotNull(selectors);
+# 
+#         Assert.assertEquals(1, selectors.size());
+# 
+#         Map<String, String> properties = helper.getProperties(selectors.get(0));
+# 
+#         Assert.assertNotNull(properties);
+# 
+#         Assert.assertEquals(1, properties.size());
+# 
+#         Assert.assertTrue(properties.containsKey("content"));
+#         Assert.assertEquals("  ", properties.get("content"));
+#     }
+
+As always, we need to provide the skeleton to make it compile.
+
+#     public Map<String, String> getProperties(String selector)
+#     {
+#         return null;
+#     }
+
+As expected, the test fails.
+
+# Tests run: 3, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.001 sec <<< FAILURE! - in org.acmsl.javacss.css.StringTemplateCSSHelperTest
+# retrieves_properties_for_a_simple_input(org.acmsl.javacss.css.StringTemplateCSSHelperTest)  Time elapsed: 0 sec  <<< FAILURE!
+# java.lang.AssertionError: null
+#         at org.junit.Assert.fail(Assert.java:86)
+#         at org.junit.Assert.assertTrue(Assert.java:41)
+#         at org.junit.Assert.assertNotNull(Assert.java:621)
+#         at org.junit.Assert.assertNotNull(Assert.java:631)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.retrieves_properties_for_a_simple_input(StringTemplateCSSHelperTest.java:123)
+
+My first attempt to implement this was:
+
+#     private Map<String, Map<String, String>> properties;
+# 
+#     [..]
+# 
+#     protected void initialize(String input)
+#     {
+#         StringTemplateCSSLexer lexer = new StringTemplateCSSLexer(new ANTLRInputStream(input));
+# 
+#         CommonTokenStream tokens = new CommonTokenStream(lexer);
+# 
+#         StringTemplateCSSParser parser = new StringTemplateCSSParser(tokens);
+# 
+#         ParseTree tree = parser.css();
+# 
+#         Collection<ParseTree> selectorEntries = XPath.findAll(tree, "//selectorCombination", parser);
+# 
+#         this.selectors = new ArrayList<String>(selectorEntries.size());
+#         this.properties = new HashMap<String, Map<String, String>>();
+# 
+#         for (ParseTree selectorEntry : selectorEntries)
+#         {
+#             String text = selectorEntry.getText();
+#             this.selectors.add(text);
+#             Map<String, String> block = retrieveProperties(selectorEntry, parser);
+# 
+#             this.properties.put(text, block);
+#         }
+#     }
+# 
+#     protected Map<String, String> retrieveProperties(ParseTree selectorEntry, StringTemplateCSSParser parser)
+#     {
+#         Map<String, String> result;
+# 
+#         Collection<ParseTree> properties = XPath.findAll(selectorEntry, "//property", parser);
+# 
+#         result = new HashMap<String, String>(properties.size());
+# 
+#         for (ParseTree property : properties)
+#         {
+#             String key = property.getChild(0).getText();
+#             String value = property.getChild(2).getText();
+#             result.put(key, value);
+#         }
+# 
+#         return result;
+#     }
+# 
+#     public Map<String, String> getProperties(String selector)
+#     {
+#         if (this.properties == null)
+#         {
+#             initialize(this.input);
+#         }
+# 
+#         return this.properties.get(selector);
+#     }
+
+However, it didn't make the test pass.
+
+# Tests run: 3, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.006 sec <<< FAILURE! - in org.acmsl.javacss.css.StringTemplateCSSHelperTest
+# retrieves_properties_for_a_simple_input(org.acmsl.javacss.css.StringTemplateCSSHelperTest)  Time elapsed: 0.006 sec  <<< FAILURE!
+# java.lang.AssertionError: expected:<1> but was:<0>
+#         at org.junit.Assert.fail(Assert.java:88)
+#         at org.junit.Assert.failNotEquals(Assert.java:743)
+#         at org.junit.Assert.assertEquals(Assert.java:118)
+#         at org.junit.Assert.assertEquals(Assert.java:555)
+#         at org.junit.Assert.assertEquals(Assert.java:542)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.retrieves_properties_for_a_simple_input(StringTemplateCSSHelperTest.java:125)
+
+The reason is that our XPath expression, "//property", is not finding anything. If we review the code, we can figure out why: the first argument to the "retrieveProperties()" should be the "css" node, and we are passing the "selectorCombination" node.
+A simple change to passing "selectorEntry.getParent()" allows the block to be parsed successfully.
+
+#     protected void initialize(String input)
+#     {
+#         StringTemplateCSSLexer lexer = new StringTemplateCSSLexer(new ANTLRInputStream(input));
+# 
+#         CommonTokenStream tokens = new CommonTokenStream(lexer);
+# 
+#         StringTemplateCSSParser parser = new StringTemplateCSSParser(tokens);
+# 
+#         ParseTree tree = parser.css();
+# 
+#         Collection<ParseTree> selectorEntries = XPath.findAll(tree, "//selectorCombination", parser);
+# 
+#         this.selectors = new ArrayList<String>(selectorEntries.size());
+#         this.properties = new HashMap<String, Map<String, String>>();
+# 
+#         for (ParseTree selectorEntry : selectorEntries)
+#         {
+#             String text = selectorEntry.getText();
+#             this.selectors.add(text);
+#             Map<String, String> block = retrieveProperties(selectorEntry.getParent(), parser);
+# 
+#             this.properties.put(text, block);
+#         }
+#     }
+# 
+#     protected Map<String, String> retrieveProperties(ParseTree cssEntry, StringTemplateCSSParser parser)
+#     {
+#         Map<String, String> result;
+# 
+#         Collection<ParseTree> properties = XPath.findAll(cssEntry, "//property", parser);
+# 
+#         result = new HashMap<String, String>(properties.size());
+# 
+#         for (ParseTree property : properties)
+#         {
+#             String key = property.getChild(0).getText();
+#             String value = property.getChild(2).getText();
+#             result.put(key, value);
+#         }
+# 
+#         return result;
+#     }
+# 
+#     public Map<String, String> getProperties(String selector)
+#     {
+#         if (this.properties == null)
+#         {
+#             initialize(this.input);
+#         }
+# 
+#         return this.properties.get(selector);
+#     }
+
+But the test still fails.
+
+# retrieves_properties_for_a_simple_input(org.acmsl.javacss.css.StringTemplateCSSHelperTest)  Time elapsed: 0.001 sec  <<< FAILURE!
+# org.junit.ComparisonFailure: expected:<[  ]> but was:<["  "]>
+#         at org.junit.Assert.assertEquals(Assert.java:115)
+#         at org.junit.Assert.assertEquals(Assert.java:144)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.retrieves_properties_for_a_simple_input(StringTemplateCSSHelperTest.java:128)
+
+We have two options. Process the value of each property to remove any surrounding quotes, or leave them as they are, and update the test. Since we are not dealing with the nature of the property values, I can live with a test assuming the values can be quoted until it's time to focus on the property values.
+
+#         Assert.assertEquals("\"  \"", properties.get("content"));
+
+As we did previously, let's make sure the properties are parsed correctly if the input contains several blocks. Also, we're interested in verifying the properties are specific for each block.
+
+#     protected void multipleBlockPropertyTests(int count)
+#     {
+#         StringBuilder input = new StringBuilder();
+# 
+#         for (int index = 0; index < count; index++)
+#         {
+#             input.append(".packageDeclaration #identifier");
+#             input.append(index);
+#             input.append("::before {\n");
+#             input.append("    content: \"");
+#             input.append(index);
+#             input.append("\";\n");
+#             input.append("}\n");
+#         }
+# 
+#         StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input.toString());
+# 
+#         List<String> selectors = helper.getSelectors();
+# 
+#         Assert.assertNotNull(selectors);
+# 
+#         Assert.assertEquals(count, selectors.size());
+# 
+#         for (int index = 0; index < count; index++)
+#         {
+#             Map<String, String> properties = helper.getProperties(selectors.get(index));
+# 
+#             Assert.assertNotNull(properties);
+# 
+#             Assert.assertEquals(1, properties.size());
+# 
+#             Assert.assertTrue(properties.containsKey("content"));
+#             Assert.assertEquals("\"" + index + "\"", properties.get("content"));
+#         }
+#     }
+# 
+#     @Test
+#     public void retrieves_properties_for_a_simple_input()
+#     {
+#         multipleBlockPropertyTests(1);
+#     }
+
+This new test is equilavent to the previous one, and passes. Let's check what happens for random number of blocks.
+
+#     @Test
+#     public void retrieves_properties_for_an_input_with_multiple_blocks()
+#     {
+#         multipleBlockPropertyTests((int) (Math.random() * 10));
+#     }
+
+It doesn't. It's a bit frustrating, but it also gives a great sense of progress.
+
+# Tests run: 4, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.007 sec <<< FAILURE! - in org.acmsl.javacss.css.StringTemplateCSSHelperTest
+# retrieves_properties_for_an_input_with_multiple_blocks(org.acmsl.javacss.css.StringTemplateCSSHelperTest)  Time elapsed: 0.007 sec  <<< FAILURE!
+# java.lang.AssertionError: expected:<0> but was:<1>
+#         at org.junit.Assert.fail(Assert.java:88)
+#         at org.junit.Assert.failNotEquals(Assert.java:743)
+#         at org.junit.Assert.assertEquals(Assert.java:118)
+#         at org.junit.Assert.assertEquals(Assert.java:555)
+#         at org.junit.Assert.assertEquals(Assert.java:542)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.multipleBlockPropertyTests(StringTemplateCSSHelperTest.java:126)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.retrieves_properties_for_an_input_with_multiple_blocks(StringTemplateCSSHelperTest.java:150)
+# 
+# 
+# Results :
+# 
+# Failed tests: 
+#   StringTemplateCSSHelperTest.retrieves_properties_for_an_input_with_multiple_blocks:150->multipleBlockPropertyTests:126 expected:<0> but was:<1>
+
+To make debugging simpler, it's better to return to a deterministic testing context.
+
+
+#     @Test
+#     public void retrieves_properties_for_an_input_with_multiple_blocks()
+#     {
+# //        multipleBlockPropertyTests((int) (Math.random() * 10));
+#         multipleBlockPropertyTests(2);
+#     }
+
+It still fails, so it's not depending on how many blocks, but only if there's more than one. We've been here already. Probably the input
+the test builds is incorrect, but ANTLR is not complaining. After a debugging session, I found out the issue. It's a bug that was not
+detected in previous tests: when we are retrieving all "property" nodes in the ParseTree, we use an XPath expresion "//property" on the
+"css" root node. However, that collection is the same, regardless which "css" or block we are processing. So at runtime, we iterate
+over the selectors, and then associate the properties. Due to this bug, and since in our test all keys are the same, all values get overriden in
+each iteration. We have to retrieve just the properties belonging to the specific selector, and therefore the XPath.findAll() call is
+not correct.
+The logic should be: for a "selectorCombination" node, its associated "properties" are the next-to-the-right siblings of type "property".
+We could write a specific test for that, but we'd probably need to use a mock framework to build the tree. On the other hand, we are
+already building such trees in our tests. Let's assume that new logic is indirectly tested already.
+Anyway, why don't we implement it using a Visitor pattern instead?
+
+#     protected Map<String, String> retrieveProperties(ParseTree selectorEntry, StringTemplateCSSParser parser)
+#     {
+#         Map<String, String> result;
+# 
+#         Collection<ParseTree> properties = findPropertyNodes(selectorEntry);
+# 
+#         result = new HashMap<String, String>(properties.size());
+# 
+#         for (ParseTree property : properties)
+#         {
+#             String key = property.getChild(0).getText();
+#             String value = property.getChild(2).getText();
+#             result.put(key, value);
+#         }
+# 
+#         return result;
+#     }
+# 
+#     protected Collection<ParseTree> findPropertyNodes(final ParseTree selectorEntry)
+#     {
+#         ParseTree parent = selectorEntry.getParent();
+#         PropertyVisitor visitor = new PropertyVisitor();
+#         parent.accept(visitor);
+# 
+#         return visitor.properties;
+#     }
+# 
+#     public Map<String, String> getProperties(String selector)
+#     {
+#         if (this.properties == null)
+#         {
+#             initialize(this.input);
+#         }
+# 
+#         return this.properties.get(selector);
+#     }
+# 
+#     protected static class PropertyVisitor
+#         extends StringTemplateCSSBaseVisitor<ParseTree>
+#     {
+#         final List<ParseTree> properties = new ArrayList<ParseTree>();
+# 
+#         public PropertyVisitor(final ParseTree parent)
+#         {
+#             this.parent = parent;
+#         }
+# 
+#         @Override
+#         public ParseTree visitProperty(@NotNull final PropertyContext ctx)
+#         {
+#             this.properties.add(ctx);
+#             return super.visitProperty(ctx);
+#         }
+#     }
+
+Unfortunately it still fails.
+
+# Tests run: 4, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.001 sec <<< FAILURE! - in org.acmsl.javacss.css.StringTemplateCSSHelperTest
+# retrieves_properties_for_an_input_with_multiple_blocks(org.acmsl.javacss.css.StringTemplateCSSHelperTest)  Time elapsed: 0.001 sec  <<< FAILURE!
+# org.junit.ComparisonFailure: expected:<"[0]"> but was:<"[1]">
+#         at org.junit.Assert.assertEquals(Assert.java:115)
+#         at org.junit.Assert.assertEquals(Assert.java:144)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.multipleBlockPropertyTests(StringTemplateCSSHelperTest.java:137)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.retrieves_properties_for_an_input_with_multiple_blocks(StringTemplateCSSHelperTest.java:151)
+# 
+# 
+# Results :
+# 
+# Failed tests:
+#   StringTemplateCSSHelperTest.retrieves_properties_for_an_input_with_multiple_blocks:151->multipleBlockPropertyTests:137 expected:<"[0]"> but was:<"[1]">
+
+The problem now is that in our current grammar, each "css" node becomes the parent of the next "css" node to the right. And that
+layout makes our visitor end up visiting all "property" nodes. To fix this, there're two options: changing the node tree (the grammar), or
+ensuring we filter out all "property" nodes whose parent is not matching the selector's. The latter is simpler, but more
+expensive at runtime, though.
+
+#     protected Map<String, String> retrieveProperties(ParseTree selectorEntry, StringTemplateCSSParser parser)
+#     {
+#         Map<String, String> result;
+# 
+#         Collection<ParseTree> properties = findPropertyNodes(selectorEntry);
+# 
+#         result = new HashMap<String, String>(properties.size());
+# 
+#         for (ParseTree property : properties)
+#         {
+#             String key = property.getChild(0).getText();
+#             String value = property.getChild(2).getText();
+#             result.put(key, value);
+#         }
+# 
+#         return result;
+#     }
+# 
+#     protected Collection<ParseTree> findPropertyNodes(final ParseTree selectorEntry)
+#     {
+#         ParseTree parent = selectorEntry.getParent();
+#         PropertyVisitor visitor = new PropertyVisitor(selectorEntry.getParent());
+#         parent.accept(visitor);
+# 
+#         return visitor.properties;
+#     }
+# 
+#     public Map<String, String> getProperties(String selector)
+#     {
+#         if (this.properties == null)
+#         {
+#             initialize(this.input);
+#         }
+# 
+#         return this.properties.get(selector);
+#     }
+# 
+#     protected static class PropertyVisitor
+#         extends StringTemplateCSSBaseVisitor<ParseTree>
+#     {
+#         final List<ParseTree> properties = new ArrayList<ParseTree>();
+#         final ParseTree parent;
+# 
+#         public PropertyVisitor(final ParseTree parent)
+#         {
+#             this.parent = parent;
+#         }
+# 
+#         @Override
+#         public ParseTree visitProperty(@NotNull final PropertyContext ctx)
+#         {
+#             if (ctx.getParent() == this.parent)
+#             {
+#                 this.properties.add(ctx);
+#             }
+#             return super.visitProperty(ctx);
+#         }
+#     }
+
+We're now back into the green zone, but don't forget we're not calling "multipleBlockPropertyTests()" with random values. When
+switching back to relying to input composed of a random number of blocks, the test fails again.
+
+
+# Tests run: 4, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.008 sec <<< FAILURE! - in org.acmsl.javacss.css.StringTemplateCSSHelperTest
+# retrieves_properties_for_an_input_with_multiple_blocks(org.acmsl.javacss.css.StringTemplateCSSHelperTest)  Time elapsed: 0.008 sec  <<< FAILURE!
+# java.lang.AssertionError: expected:<0> but was:<1>
+#         at org.junit.Assert.fail(Assert.java:88)
+#         at org.junit.Assert.failNotEquals(Assert.java:743)
+#         at org.junit.Assert.assertEquals(Assert.java:118)
+#         at org.junit.Assert.assertEquals(Assert.java:555)
+#         at org.junit.Assert.assertEquals(Assert.java:542)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.multipleBlockPropertyTests(StringTemplateCSSHelperTest.java:133)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.retrieves_properties_for_an_input_with_multiple_blocks(StringTemplateCSSHelperTest.java:158)
+# 
+# 
+# Results :
+# 
+# Failed tests:
+#   StringTemplateCSSHelperTest.retrieves_properties_for_an_input_with_multiple_blocks:158->multipleBlockPropertyTests:133 expected:<0> but was:<1>
+
+This test is interesting, because it uncovers one aspect we are not dealing with: invalid inputs. The "multipleBlockPropertyTest()" method, when receiving a 0 as parameter, generates
+invalid input. Consequently, the parser complaints. Surprisingly, the XPath expression returns a match consisting of an empty string.
+
+For now, let's annotate this for the next iteration: manage errors in ANTLR parsers / deal with invalid input. Meanwhile we have
+to ensure we are not testing empty or wrong inputs.
+
+#     @Test
+#     public void retrieves_properties_for_an_input_with_multiple_blocks()
+#     {
+#         multipleBlockPropertyTests((int) (Math.random() * 10) + 1);
+#     }
+
+*** Fourth test: Matching selectors
+
+The next logical step is to find all matching selectors, for a given AST. We'll use it in the context of StringTemplate templates, but
+need not to be constrained to any specific AST.
+
+It's worth reviewing our selector syntax:
+
+- a rule starting with a dot matches node classes.
+- a rule starting with a hash identifies unique nodes.
+- a rule with surrounding quotes selects nodes whose text matches the rule text.
+- any optional pseudo-element (::before or ::after) do not customize the nodes themselves, but add new siblings.
+
+What would be a good scenario for checking if a selector is matching the correct node in a given AST? As always, start by
+something simple, and increase in complexity gradually.
+
+For our AST, a good fit could be the one produced by parsing this package declaration:
+
+  package com.foo.bar;
+
+That is,
+
+# dot-syntax:
+# packageDeclaration;
+# packageLiteral [label="package"];
+# comIdentifier [label="com"];
+# dot1 [label="."];
+# fooIdentifier [label="foo"];
+# dot2 [label="."];
+# barIdentifier [label="bar"];
+# semicolon [label=";"];
+# packageLiteral -> packageDeclaration;
+# comIdentifier -> packageDeclaration;
+# dot1 -> packageDeclaration;
+# fooIdentifier -> packageDeclaration;
+# dot2 -> packageDeclaration;
+# barIdentifier -> packageDeclaration;
+# semicolon -> packageDeclaration;
+
+For the CSS, this would be simple enough: add a blank space before the semicolon.
+
+# .packageDeclaration ";"::before {
+#    content: " ";
+# }
+
+Notice we're not testing whether the final output included the blank space before the semicolon.
+For now, we only want to implement the logic to find out which CSS block applies to each node in the AST. Or even simpler:
+testing every node has no matching selectors, but the semicolon. Additionally, since we have no immediate need for a better
+design, we'll implement the logic in our current helper class.
+
+
+#     @Test
+#     public void finds_the_matching_selector()
+#     {
+#         String javaInput = "package com.foo.bar;";
+# 
+#         String cssInput =
+#               ".packageDeclaration \";\"::before {\n"
+#             + "   content: \" \";\n"
+#             + "}\n";
+# 
+#         StringTemplateCSSHelper helper = new StringTemplateCSSHelper(cssInput);
+# 
+#         Java8Lexer lexer = new Java8Lexer(new ANTLRInputStream(javaInput));
+#         CommonTokenStream tokens = new CommonTokenStream(lexer);
+#         Java8Parser parser = new Java8Parser(tokens);
+#         ParseTree ast = parser.compilationUnit();
+# 
+#         Collection<ParseTree> matches = XPath.findAll(ast, "//';'", parser);
+# 
+#         Assert.assertNotNull(matches);
+#         Assert.assertEquals(1, matches.size());
+# 
+#         ParseTree semiColon = matches.toArray(new ParseTree[1])[0];
+#         Assert.assertNotNull(semiColon);
+# 
+#         String matchedSelectors = helper.retrieveMatchingSelectors(semiColon);
+# 
+#         Assert.assertNotNull(matchedSelectors);
+#         Assert.assertEquals(".packageDeclaration \";\"::before", matchedSelectors);
+#     }
+
+This test is more involved, and of course it won't compile until we write the new method "retrieveMatchingSelectors()".
+
+#     public String retrieveMatchingSelectors(ParseTree semiColon)
+#     {
+#         return null;
+#     }
+
+And as expected, the null assertion makes the test fail.
+
+# Tests run: 5, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.015 sec <<< FAILURE! - in org.acmsl.javacss.css.StringTemplateCSSHelperTest
+# finds_the_matching_selector(org.acmsl.javacss.css.StringTemplateCSSHelperTest)  Time elapsed: 0.007 sec  <<< FAILURE!
+# java.lang.AssertionError: null
+#         at org.junit.Assert.fail(Assert.java:86)
+#         at org.junit.Assert.assertTrue(Assert.java:41)
+#         at org.junit.Assert.assertNotNull(Assert.java:621)
+#         at org.junit.Assert.assertNotNull(Assert.java:631)
+#         at org.acmsl.javacss.css.StringTemplateCSSHelperTest.finds_the_matching_selector(StringTemplateCSSHelperTest.java:187)
+# 
+# 
+# Results :
+# 
+# Failed tests:
+#   StringTemplateCSSHelperTest.finds_the_matching_selector:187 null
+
+Now we have to actually implement the "retrieveMatchingSelectors()" method. It's not straight-forward: we
+have to find which selector defines a set which includes the input AST. Currently, we are storing the combination of 
+selectors as one piece of text. Parsing it again makes no sense whatsoever, so we should invest some time fixing this first.
+Instead of a list of Strings, it makes more sense to describe it as a list of list of Strings.
+
+# public class StringTemplateCSSHelper
+# {
+#     private final String input;
+#     private List<List<String>> selectors;
+#     private Map<List<String>, Map<String, String>> properties;
+# 
+#     public StringTemplateCSSHelper(final String input)
+#     {
+#         this.input = input;
+#     }
+# 
+#     public List<List<String>> getSelectors()
+#     {
+#         if (this.selectors == null)
+#         {
+#             initialize(this.input);
+#         }
+#         
+#         return this.selectors;
+#     }
+# 
+#     protected void initialize(String input)
+#     {
+#         StringTemplateCSSLexer lexer = new StringTemplateCSSLexer(new ANTLRInputStream(input));
+# 
+#         CommonTokenStream tokens = new CommonTokenStream(lexer);
+# 
+#         StringTemplateCSSParser parser = new StringTemplateCSSParser(tokens);
+# 
+#         ParseTree tree = parser.css();
+# 
+#         Collection<ParseTree> selectorCombinations = XPath.findAll(tree, "//selectorCombination", parser);
+# 
+#         this.selectors = new ArrayList<List<String>>(selectorCombinations.size());
+#         this.properties = new HashMap<List<String>, Map<String, String>>();
+# 
+#         for (ParseTree selectorCombination : selectorCombinations)
+#         {
+#             List<String> currentSelectors = new ArrayList<String>(selectorCombination.getChildCount());
+#             this.selectors.add(currentSelectors);
+# 
+#             for (int index = 0; index < selectorCombination.getChildCount(); index++)
+#             {
+#                 String text = selectorCombination.getChild(index).getText();
+#                 currentSelectors.add(text);
+#             }
+#             Map<String, String> block = retrieveProperties(selectorCombination, parser);
+# 
+#             this.properties.put(currentSelectors, block);
+#         }
+#     }
+# 
+#     protected Map<String, String> retrieveProperties(ParseTree selectorEntry, StringTemplateCSSParser parser)
+#     {
+#         Map<String, String> result;
+# 
+#         Collection<ParseTree> properties = findPropertyNodes(selectorEntry);
+# 
+#         result = new HashMap<String, String>(properties.size());
+# 
+#         for (ParseTree property : properties)
+#         {
+#             String key = property.getChild(0).getText();
+#             String value = property.getChild(2).getText();
+#             result.put(key, value);
+#         }
+# 
+#         return result;
+#     }
+# 
+#     protected Collection<ParseTree> findPropertyNodes(final ParseTree selectorEntry)
+#     {
+#         ParseTree parent = selectorEntry.getParent();
+#         PropertyVisitor visitor = new PropertyVisitor(selectorEntry.getParent());
+#         parent.accept(visitor);
+# 
+#         return visitor.properties;
+#     }
+# 
+#     public Map<String, String> getProperties(List<String> selector)
+#     {
+#         if (this.properties == null)
+#         {
+#             initialize(this.input);
+#         }
+# 
+#         return this.properties.get(selector);
+#     }
+# 
+#     [..]
+# }
+
+The current StringTemplateCSSHelperTest needs to be modified because of the API changes.
+
+#     @Test
+#     public void retrieves_selectors_for_a_simple_input()
+#     {
+#         String input =
+#             ".packageDeclaration #identifier::before {\n"
+#             + "    content: \"  \";\n"
+#             + "}\n";
+# 
+#         StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input);
+# 
+#         List<List<String>> selectorCombinations = helper.getSelectors();
+# 
+#         Assert.assertNotNull(selectorCombinations);
+# 
+#         Assert.assertEquals(1, selectorCombinations.size());
+# 
+#         List<String> selectors = selectorCombinations.get(0);
+#         Assert.assertEquals(2, selectors.size());
+# 
+#         Assert.assertEquals(".packageDeclaration", selectors.get(0));
+#         Assert.assertEquals("#identifier::before", selectors.get(1));
+#     }
+# 
+#     protected void multipleBlockSelectorTests(int count)
+#     {
+#         StringBuilder input = new StringBuilder();
+# 
+#         for (int index = 0; index < count; index++)
+#         {
+#             input.append(".packageDeclaration #identifier");
+#             input.append(index);
+#             input.append("::before {\n    content: \"  \";\n}\n\n");
+#         }
+# 
+#         StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input.toString());
+# 
+#         List<List<String>> selectorCombinations = helper.getSelectors();
+# 
+#         Assert.assertNotNull(selectorCombinations);
+# 
+#         Assert.assertEquals(count, selectorCombinations.size());
+# 
+#         for (int index = 0; index < count; index++)
+#         {
+#             List<String> selectors = selectorCombinations.get(index);
+# 
+#             Assert.assertEquals(".packageDeclaration", selectors.get(0));
+#             Assert.assertEquals("#identifier" + index + "::before", selectors.get(1));
+#         }
+#     }
+# 
+#     @Test
+#     public void retrieves_selectors_for_an_input_with_several_blocks()
+#     {
+#         multipleBlockSelectorTests((int) (Math.random() * 10));
+#     }
+# 
+#     protected void multipleBlockPropertyTests(int count)
+#     {
+#         StringBuilder input = new StringBuilder();
+# 
+#         for (int index = 0; index < count; index++)
+#         {
+#             input.append(".packageDeclaration #identifier");
+#             input.append(index);
+#             input.append("::before {\n");
+#             input.append("    content: \"");
+#             input.append(index);
+#             input.append("\";\n");
+#             input.append("}\n");
+#         }
+# 
+#         StringTemplateCSSHelper helper = new StringTemplateCSSHelper(input.toString());
+# 
+#         List<List<String>> selectors = helper.getSelectors();
+# 
+#         Assert.assertNotNull(selectors);
+# 
+#         Assert.assertEquals(count, selectors.size());
+# 
+#         for (int index = 0; index < count; index++)
+#         {
+#             Map<String, String> properties = helper.getProperties(selectors.get(index));
+# 
+#             Assert.assertNotNull(properties);
+# 
+#             Assert.assertEquals(1, properties.size());
+# 
+#             Assert.assertTrue(properties.containsKey("content"));
+#             Assert.assertEquals("\"" + index + "\"", properties.get("content"));
+#         }
+#     }
+# 
+#     [..]
+# }
+
+Even though we've had to change the tests, the changes were pretty simple, and the test passed nicely.

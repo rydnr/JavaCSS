@@ -4,7 +4,7 @@
 grammar StringTemplateCSS;
 
 css
-	:	selectorCombination '{' property+ '}' EOF
+	:	selectorCombination '{' property+ '}' css* EOF
 	;
 
 selectorCombination

@@ -84,6 +84,11 @@
       <groupId>org.checkthread</groupId>
       <artifactId>checkthread-annotations</artifactId>
     </dependency>
+      <dependency>
+          <groupId>org.antlr</groupId>
+          <artifactId>antlr4-runtime</artifactId>
+          <version>4.3</version>
+      </dependency>
   </dependencies>
 
   <build>
