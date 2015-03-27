@@ -38,13 +38,18 @@ package org.acmsl.javacss.css;
 /*
  * Importing JetBrains annotations.
  */
+import org.acmsl.commons.utils.StringUtils;
 import org.acmsl.javacss.css.parser.StringTemplateCSSBaseVisitor;
 import org.acmsl.javacss.css.parser.StringTemplateCSSLexer;
 import org.acmsl.javacss.css.parser.StringTemplateCSSParser;
 import org.acmsl.javacss.css.parser.StringTemplateCSSParser.PropertyContext;
-import org.acmsl.javacss.css.parser.StringTemplateCSSVisitor;
+import org.antlr.v4.runtime.ANTLRErrorStrategy;
+import org.antlr.v4.runtime.BailErrorStrategy;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.ANTLRInputStream;
+import org.antlr.v4.runtime.Parser;
+import org.antlr.v4.runtime.RecognitionException;
+import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.misc.NotNull;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.xpath.XPath;
@@ -67,21 +72,18 @@ import java.util.Map;
  * Created: 2015/03/02 17:13
  */
 @ThreadSafe
-public class StringTemplateCSSHelper
-{
+public class StringTemplateCSSHelper {
     private final String input;
     private List<List<String>> selectors;
     private Map<List<String>, Map<String, String>> properties;
 
-    public StringTemplateCSSHelper(final String input)
-    {
+    public StringTemplateCSSHelper(final String input) {
         this.input = input;
     }
 
     public List<List<String>> getSelectors()
     {
-        if (this.selectors == null)
-        {
+        if (this.selectors == null) {
             initialize(this.input);
         }
         
@@ -96,30 +98,32 @@ public class StringTemplateCSSHelper
 
         StringTemplateCSSParser parser = new StringTemplateCSSParser(tokens);
 
+        parser.setErrorHandler(new BailErrorStrategy());
+
         ParseTree tree = parser.css();
 
         Collection<ParseTree> selectorCombinations = XPath.findAll(tree, "//selectorCombination", parser);
 
+        final StringUtils stringUtils = StringUtils.getInstance();
+
         this.selectors = new ArrayList<List<String>>(selectorCombinations.size());
         this.properties = new HashMap<List<String>, Map<String, String>>();
 
-        for (ParseTree selectorCombination : selectorCombinations)
-        {
+        for (ParseTree selectorCombination : selectorCombinations) {
             List<String> currentSelectors = new ArrayList<String>(selectorCombination.getChildCount());
             this.selectors.add(currentSelectors);
 
-            for (int index = 0; index < selectorCombination.getChildCount(); index++)
-            {
+            for (int index = 0; index < selectorCombination.getChildCount(); index++) {
                 String text = selectorCombination.getChild(index).getText();
                 currentSelectors.add(text);
             }
-            Map<String, String> block = retrieveProperties(selectorCombination, parser);
+            Map<String, String> block = retrieveProperties(selectorCombination, stringUtils);
 
             this.properties.put(currentSelectors, block);
         }
     }
 
-    protected Map<String, String> retrieveProperties(ParseTree selectorEntry, StringTemplateCSSParser parser)
+    protected Map<String, String> retrieveProperties(ParseTree selectorEntry, StringUtils stringUtls)
     {
         Map<String, String> result;
 
@@ -127,10 +131,9 @@ public class StringTemplateCSSHelper
 
         result = new HashMap<String, String>(properties.size());
 
-        for (ParseTree property : properties)
-        {
+        for (ParseTree property : properties) {
             String key = property.getChild(0).getText();
-            String value = property.getChild(2).getText();
+            String value = stringUtls.unquote(stringUtls.unquote(property.getChild(2).getText(), '"'), '\'');
             result.put(key, value);
         }
 
@@ -148,17 +151,39 @@ public class StringTemplateCSSHelper
 
     public Map<String, String> getProperties(List<String> selector)
     {
-        if (this.properties == null)
-        {
+        if (this.properties == null) {
             initialize(this.input);
         }
 
         return this.properties.get(selector);
     }
 
-    public String retrieveMatchingSelectors(ParseTree semiColon)
-    {
-        return null;
+    public List<Css> retrieveMatchingCss(ParseTree node, ParseTree ast) {
+        List<Css> result = new ArrayList<Css>();
+
+        for (List<String> selectors : getSelectors()) {
+            if (match(selectors, node, ast)) {
+                Css css = new Css();
+                for (String selector : selectors) {
+                    css.addSelector(selector);
+                }
+                for (Map.Entry<String, String> entry : this.properties.get(selectors).entrySet()) {
+                    css.addProperty(new Property<String>(entry.getKey(), entry.getValue()));
+                }
+                result.add(css);
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    protected boolean match(List<String> selectors, ParseTree node, ParseTree ast) {
+        SelectorMatchVisitor visitor = new SelectorMatchVisitor(selectors, node);
+
+        visitor.visit(ast);
+
+        return visitor.matchFound();
     }
 
     protected static class PropertyVisitor
