@@ -6,7 +6,7 @@
   <groupId>org.acmsl</groupId>
   <artifactId>javacss</artifactId>
   <packaging>jar</packaging>
-  <version>latest-SNAPSHOT</version>
+  <version>3.1.111</version>
   <name>JavaCSS</name>
   <url>http://www.acm-sl.org</url>
   <inceptionYear>2015</inceptionYear>
@@ -25,7 +25,7 @@
   <parent>
     <groupId>org.acmsl</groupId>
     <artifactId>acmsl-pom</artifactId>
-    <version>latest-SNAPSHOT</version>
+    <version>3.1.111</version>
   </parent>
 
   <scm>
