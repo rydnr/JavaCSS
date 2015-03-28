@@ -42,7 +42,7 @@
 
   <ciManagement>
     <system>Jenkins</system>
-    <url>http://jenkins.acm-sl.org/job/javacss</url>
+    <url>http://jenkins.acm-sl.org/job/JavaCSS</url>
     <notifiers>
       <notifier>
         <type>mail</type>
